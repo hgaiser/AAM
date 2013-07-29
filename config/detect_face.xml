@@ -1,0 +1,13 @@
+<configuration>
+  <cascade>
+  	<facename>frontalface_default.xml</facename>
+  	<nosename>nose_default.xml</nosename>
+  	<cuda>false</cuda>
+  	<scale>1.0</scale>
+  </cascade>
+  <model>
+	<name>aam.mat</name>
+  </model>
+  <image_topic>/camera/rgb/image_color</image_topic>
+  <show_images>true</show_images>
+</configuration>
