@@ -228,9 +228,14 @@ cv::Mat warpImage(cv::Mat image, cv::Mat src, cv::Mat tris, cv::Mat warp_map)
 		double gamma = warp_map.at<double>(w, 5);
 
 		cv::Mat srcTri(3, 2, CV_64FC1);
-		src.row(tris.at<int16_t>(t, 0) - 1).copyTo(srcTri.row(0));
-		src.row(tris.at<int16_t>(t, 1) - 1).copyTo(srcTri.row(1));
-		src.row(tris.at<int16_t>(t, 2) - 1).copyTo(srcTri.row(2));
+
+		cv::Mat row0 = srcTri.row(0);
+		cv::Mat row1 = srcTri.row(1);
+		cv::Mat row2 = srcTri.row(2);
+
+		src.row(tris.at<int16_t>(t, 0) - 1).copyTo(row0);
+		src.row(tris.at<int16_t>(t, 1) - 1).copyTo(row1);
+		src.row(tris.at<int16_t>(t, 2) - 1).copyTo(row2);
 
 		cv::Mat projection = alpha * srcTri.row(0) + beta * srcTri.row(1) + gamma * srcTri.row(2);
 
