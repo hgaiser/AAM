@@ -18,4 +18,4 @@ include_directories(include
 
 add_executable(AAM src/AAM.cpp src/DetectFace.cpp src/MatlabIO.cpp)
 
-target_link_libraries(AAM ${OpenCV_LIBRARIES} ${TINYXML_LIBRARIES})
+target_link_libraries(AAM ${OpenCV_LIBS} ${TINYXML_LIBRARIES})

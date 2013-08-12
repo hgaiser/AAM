@@ -70,7 +70,11 @@ DetectFace::DetectFace(const char * workingDir) :
 void DetectFace::loadModel()
 {
 	MatlabIO matio;
-	matio.open(std::string(m_workingDir) + "/model/" + m_model.modelName.c_str(), "r");
+	if (matio.open(std::string(m_workingDir) + "/model/" + m_model.modelName.c_str(), "r") == false)
+	{
+		std::cerr << "No model found!" << std::endl;
+		return;
+	}
 
 	std::vector<MatlabIOContainer> variables;
 	variables = matio.read();
