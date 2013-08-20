@@ -6,6 +6,9 @@
  */
 
 #include "DetectFace.h"
+#include <functional>
+#include <GL/gl.h>
+#include <GL/freeglut.h>
 
 namespace eva
 {
@@ -210,6 +213,54 @@ void DetectFace::drawText(cv::Mat & image, std::string text, cv::Scalar fontColo
 	putText(image, text, org, fontFace, fontScale, fontColor, fontThickness, 16);
 }
 
+std::function<void()> fnDisplayFunc;
+void displayFunc()
+{
+    fnDisplayFunc();
+}
+
+GLuint textureID;
+void loadImageToTexture(cv::Mat image)
+{
+    glGenTextures(1, &textureID);
+    glBindTexture(GL_TEXTURE_2D, textureID);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.cols, image.rows, 0, GL_BGR, GL_UNSIGNED_BYTE, image.ptr());
+}
+
+static const double fInv640 = 1.0f / 640.0f;
+static const double fInv480 = 1.0f / 480.0f;
+void warpImageGL(cv::Mat curr_points, cv::Mat shape_mesh, cv::Mat shape_mean)
+{
+    // Clear background
+    glClearColor(0.0, 0.0, 0.0, 0.0);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Render
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, textureID);
+
+    glBegin(GL_TRIANGLES);
+	for (int t = 0; t < shape_mesh.rows; t++)
+	{
+		glTexCoord2d(curr_points.at<double>(shape_mesh.at<int16_t>(t, 0) - 1, 1) * fInv640, curr_points.at<double>(shape_mesh.at<int16_t>(t, 0) - 1, 0) * fInv480);
+		glVertex2d  (shape_mean.at<double>(shape_mesh.at<int16_t>(t, 0) - 1, 1),            shape_mean.at<double>(shape_mesh.at<int16_t>(t, 0) - 1, 0));
+
+		glTexCoord2d(curr_points.at<double>(shape_mesh.at<int16_t>(t, 1) - 1, 1) * fInv640, curr_points.at<double>(shape_mesh.at<int16_t>(t, 1) - 1, 0) * fInv480);
+		glVertex2d  (shape_mean.at<double>(shape_mesh.at<int16_t>(t, 1) - 1, 1),            shape_mean.at<double>(shape_mesh.at<int16_t>(t, 1) - 1, 0));
+
+		glTexCoord2d(curr_points.at<double>(shape_mesh.at<int16_t>(t, 2) - 1, 1) * fInv640, curr_points.at<double>(shape_mesh.at<int16_t>(t, 2) - 1, 0) * fInv480);
+		glVertex2d  (shape_mean.at<double>(shape_mesh.at<int16_t>(t, 2) - 1, 1),            shape_mean.at<double>(shape_mesh.at<int16_t>(t, 2) - 1, 0));
+	}
+    glEnd();
+
+    // Flush pipeline
+    glFlush();
+}
+
 /**
  * Warps image from src using the warp map and the triangles in tris.
  */
@@ -349,14 +400,35 @@ void to_affine(DetectFace::Model aam, cv::Mat q, cv::Mat & A, cv::Mat & tr)
  */
 void DetectFace::matchModel(cv::Mat image)
 {
-	cv::Mat im;
-	cv::cvtColor(image, im, CV_BGR2RGB);
+#if 0
 
-	//ros::Time s = ros::Time::now();
-	im = warpImage(im, m_model.curr_points, m_model.shape_mesh, m_model.warp_map);
-	//std::cout << "Warping took: " << (ros::Time::now() - s).toSec() << std::endl;
+    cv::Mat im;
+    cv::cvtColor(image, im, CV_BGR2RGB);
 
-	im = im(cv::Rect(0, 0, m_model.width, m_model.height));
+    //ros::Time s = ros::Time::now();
+    im = warpImage(im, m_model.curr_points, m_model.shape_mesh, m_model.warp_map);
+    //std::cout << "Warping took: " << (ros::Time::now() - s).toSec() << std::endl;
+
+    im = im(cv::Rect(0, 0, m_model.width, m_model.height));
+
+#else
+
+    cv::Mat im(m_model.height, m_model.width, CV_8UC3);
+
+    // Why does this not work?
+    //fnDisplayFunc = std::bind(warpImageGL, m_model.curr_points, m_model.shape_mesh, m_model.shape_mean);
+    //glutMainLoopEvent();
+
+    // Call directly
+    warpImageGL(m_model.curr_points, m_model.shape_mesh, m_model.shape_mean);
+
+    // Read warped image
+    glPixelStorei(GL_PACK_ALIGNMENT, (im.step & 3) ? 1 : 4);
+    glPixelStorei(GL_PACK_ROW_LENGTH, im.step / im.elemSize());
+    glReadPixels(0, 0, im.cols, im.rows, GL_BGR, GL_UNSIGNED_BYTE, im.data);
+
+#endif
+
 	im.convertTo(im, CV_64FC1, 1.0/255.0);
 	cv::Mat channels[3];
 	cv::split(im, channels);
@@ -472,13 +544,29 @@ void DetectFace::matchModel(cv::Mat image)
  */
 void DetectFace::spin()
 {
-	cv::Mat image = cv::imread(m_workingDir + "/image.jpg");
+    cv::Mat image = cv::imread(m_workingDir + "/image.jpg");
+
+    // Setup GLUT environment
+    int argc = 0;
+    glutInit(&argc, 0);
+    glutInitDisplayMode(GLUT_SINGLE | GLUT_RGB);
+    glutInitWindowSize(m_model.width, m_model.height);
+    glutInitWindowPosition(100, 100);
+    glutCreateWindow("Warped Face");
+    glutDisplayFunc(displayFunc);
+    // Setup OpenGL 2D rendering
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0.0f, m_model.width, 0.0f, m_model.height, 0.0f, 1.0f); // Upside down image (for OpenCV)
+    //glOrtho(0.0f, m_model.width, m_model.height, 0.0f, 0.0f, 1.0f); // Normal image
+    // Load texture
+    loadImageToTexture(image);
 
 	//Start and end times
 	time_t start,end;
 	int counter = 0;
 	time(&start);
-	while (cv::waitKey(10) != 'q')
+	while (true) //(cv::waitKey(10) != 'q')
 	{
 		processImage(image);
 
