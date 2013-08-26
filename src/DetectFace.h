@@ -60,6 +60,7 @@ public:
 		cv::Mat shape_mesh;
 
 		cv::Mat app_mean;
+		cv::Mat app_mean_mat;
 		cv::Mat app_vectors;
 		cv::Mat gradient;
 

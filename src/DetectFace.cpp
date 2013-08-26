@@ -94,6 +94,7 @@ void DetectFace::loadModel()
 	m_model.shape_mesh = matio.find<cv::Mat>(aam[0], "shape_mesh");
 
 	m_model.app_mean = matio.find<cv::Mat>(aam[0], "app_mean");
+	m_model.app_mean_mat = matio.find<cv::Mat>(aam[0], "app_mean_mat");
 	m_model.app_vectors = matio.find<cv::Mat>(aam[0], "app_ev");
 	// m_model.gradient = matio.find<cv::Mat>(aam[0], "gradient");
 
@@ -213,10 +214,10 @@ void DetectFace::drawText(cv::Mat & image, std::string text, cv::Scalar fontColo
 	putText(image, text, org, fontFace, fontScale, fontColor, fontThickness, 16);
 }
 
-std::function<void()> fnDisplayFunc;
+//std::function<void()> fnDisplayFunc;
 void displayFunc()
 {
-    fnDisplayFunc();
+    //fnDisplayFunc();
 }
 
 GLuint textureID;
