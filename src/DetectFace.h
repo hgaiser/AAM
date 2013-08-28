@@ -7,8 +7,6 @@
 
 #ifndef DETECTFACE_H_
 #define DETECTFACE_H_
- 
-#include <iomanip>
 
 #include <opencv2/objdetect/objdetect.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -18,11 +16,14 @@
 
 #include "MatlabIO.hpp"
 
-#ifdef WITH_CUDA
+#ifdef HAVE_CUDA
 #include <opencv2/gpu/gpu.hpp>
 #endif
 
 #include <tinyxml.h>
+
+#define TYPE float
+#define MAT_TYPE(n) (typeid(TYPE) == typeid(float) ? CV_32FC(n) : CV_64FC(n))
 
 namespace eva
 {
@@ -37,6 +38,9 @@ public:
 		std::string faceCascadeName;
 		std::string noseCascadeName;
 		double scale;
+		double iterationThreshold;
+		uint32_t translationIteration;
+		uint32_t maxIteration;
 
 		std::string imageTopic;
 		bool showImages;
@@ -60,27 +64,31 @@ public:
 		cv::Mat shape_mesh;
 
 		cv::Mat app_mean;
-		cv::Mat app_mean_mat;
 		cv::Mat app_vectors;
 		cv::Mat gradient;
 
 		cv::Mat steepest_descent;
 		cv::Mat H;
 		cv::Mat invH;
-		cv::Mat R;
+		std::vector<cv::Mat> R;
 
 		cv::Mat warp_map;
+
+		uint32_t no_pixels;
+		uint32_t trans_it;
+
 	};
 
 	void spin();
 
 private:
-	std::string m_workingDir;
+	bool m_modelLoaded;
 	std::string m_configPath;
+	std::string m_workingDir;
 
 	cv::CascadeClassifier m_faceCascade;
 	cv::CascadeClassifier m_noseCascade;
-#ifdef WITH_CUDA
+#ifdef HAVE_CUDA
 	cv::gpu::CascadeClassifier_GPU m_faceCascadeGpu;
 	cv::gpu::CascadeClassifier_GPU m_noseCascadeGpu;
 #endif

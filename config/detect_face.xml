@@ -4,6 +4,9 @@
   	<nosename>nose_default.xml</nosename>
   	<cuda>false</cuda>
   	<scale>1.0</scale>
+  	<iteration_threshold>0.001</iteration_threshold>
+  	<translation_iteration>5</translation_iteration>
+  	<max_iteration>10</max_iteration>
   </cascade>
   <model>
 	<name>aam.mat</name>
