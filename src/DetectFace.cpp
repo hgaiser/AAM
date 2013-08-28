@@ -106,7 +106,8 @@ void DetectFace::loadModel()
 	m_model.shape_mesh = matio.find<cv::Mat>(aam[0], "shape_mesh");
 
 	m_model.app_mean = matio.find<cv::Mat>(aam[0], "app_mean");
-	m_model.app_mean.convertTo(m_model.app_mean, MAT_TYPE(3));
+	m_model.app_mean.convertTo(m_model.app_mean, CV_32SC3, 127);
+	//m_model.app_mean.convertTo(m_model.app_mean, MAT_TYPE(3));
 	//m_model.app_vectors = matio.find<cv::Mat>(aam[0], "app_ev");
 	//m_model.app_vectors.convertTo(m_model.app_vectors, MAT_TYPE(1));
 	// m_model.gradient = matio.find<cv::Mat>(aam[0], "gradient");
@@ -118,7 +119,8 @@ void DetectFace::loadModel()
 	for (int i = 0; i < R.size(); i++)
 	{
 		m_model.R.push_back(R[i].data<cv::Mat>());
-		m_model.R[i].convertTo(m_model.R[i], MAT_TYPE(3));
+		m_model.R[i].convertTo(m_model.R[i], CV_32SC3, 127);
+		//m_model.R[i].convertTo(m_model.R[i], MAT_TYPE(3));
 	}
 
 	/*m_model.R = matio.find<cv::Mat>(aam[0], "R");
@@ -380,8 +382,8 @@ void to_affine(DetectFace::Model aam, cv::Mat q, cv::Mat & A, cv::Mat & tr)
 		base.at<TYPE>(0, i) = aam.shape_mean.at<TYPE>(t.at<int16_t>(0, i), 0);
 		base.at<TYPE>(1, i) = aam.shape_mean.at<TYPE>(t.at<int16_t>(0, i), 1);
 
-		warped.at<TYPE>(0, i) = cv::Mat(base.at<TYPE>(0, i) + aam.shape_transform.row(t.at<int16_t>(0, i)) * q.t()).at<TYPE>(0,0);
-		warped.at<TYPE>(1, i) = cv::Mat(base.at<TYPE>(1, i) + aam.shape_transform.row(np + t.at<int16_t>(0, i)) * q.t()).at<TYPE>(0,0);
+		warped.at<TYPE>(0, i) = cv::Mat(base.at<TYPE>(0, i) + aam.shape_transform.row(t.at<int16_t>(0, i)) * q).at<TYPE>(0,0);
+		warped.at<TYPE>(1, i) = cv::Mat(base.at<TYPE>(1, i) + aam.shape_transform.row(np + t.at<int16_t>(0, i)) * q).at<TYPE>(0,0);
 	}
 
 	TYPE den = (base.at<TYPE>(0,1) - base.at<TYPE>(0,0)) * (base.at<TYPE>(1,2) - base.at<TYPE>(1,0)) - (base.at<TYPE>(1,1) - base.at<TYPE>(1,0)) * (base.at<TYPE>(0,2) - base.at<TYPE>(0,0));
@@ -517,7 +519,8 @@ void DetectFace::matchModel(cv::Mat image)
 		//std::cout << "Warping took: " << (ros::Time::now() - s).toSec() << std::endl;*/
 
 		warped_im = warped_im(cv::Rect(0, 0, m_model.width, m_model.height));
-		warped_im.convertTo(warped_im, MAT_TYPE(1), 1.0/255.0);
+		warped_im.convertTo(warped_im, CV_32SC3, 127.0/255.0);
+		//warped_im.convertTo(warped_im, MAT_TYPE(1), 1.0/255.0);
 
 		// calculate the error image, is there a better way perhaps?
 		cv::Mat err_im = warped_im - m_model.app_mean;
@@ -532,8 +535,10 @@ void DetectFace::matchModel(cv::Mat image)
 			for (int i = 0; i < 4; i++)
 				delta_q.at<TYPE>(i, 0) = cv::sum(cv::sum(m_model.R[i].mul(err_im)))[0];
 
+			delta_q /= (127.0 * 127.0);
+
 			cv::Mat A, tr;
-			to_affine(m_model, -delta_q.t(), A, tr);
+			to_affine(m_model, -delta_q, A, tr);
 
 			// calculate the delta shape
 			cv::Mat delta_shape = (m_model.shape_mean * A);
@@ -550,6 +555,8 @@ void DetectFace::matchModel(cv::Mat image)
 			for (int i = 0; i < m_model.R.size(); i++)
 				delta_qp.at<TYPE>(i, 0) = cv::sum(cv::sum(m_model.R[i].mul(err_im)))[0];
 
+			delta_qp /= (127.0 * 127.0);
+
 			cv::Mat d_s0(m_model.shape_mean.size(), MAT_TYPE(1));
 			cv::Mat s;
 			cv::reduce(m_model.shape_vectors * delta_qp.rowRange(4, delta_qp.rows), s, 1, CV_REDUCE_SUM);
@@ -558,7 +565,7 @@ void DetectFace::matchModel(cv::Mat image)
 			d_s0 = m_model.shape_mean - d_s0;
 
 			cv::Mat A, tr;
-			to_affine(m_model, -delta_qp.rowRange(0, 4).t(), A, tr);
+			to_affine(m_model, -delta_qp.rowRange(0, 4), A, tr);
 
 			d_s0 *= A;
 			d_s0.col(0) += tr.at<TYPE>(0, 0);
@@ -729,7 +736,11 @@ void DetectFace::spin()
 	time_t start,end;
 	int counter = 0;
 	time(&start);
-	while (cv::waitKey(10) != 'q')
+#ifdef __APPLE__
+	while (cv::waitKey(10) != 'q') // osx needs the waitKey call to update the image frame
+#else
+	while (true)
+#endif
 	{
 		processImage(image);
 
