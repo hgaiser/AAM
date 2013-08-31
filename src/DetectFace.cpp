@@ -14,6 +14,7 @@
 #include <OpenGL/gl.h>
 #include <GLUT/glut.h>
 #else
+#define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
 #include <GL/freeglut.h>
 #endif
@@ -106,7 +107,7 @@ void DetectFace::loadModel()
 	m_model.shape_mesh = matio.find<cv::Mat>(aam[0], "shape_mesh");
 
 	m_model.app_mean = matio.find<cv::Mat>(aam[0], "app_mean");
-	m_model.app_mean.convertTo(m_model.app_mean, CV_32SC3, 127);
+	m_model.app_mean.convertTo(m_model.app_mean, CV_8UC3, 255);
 	//m_model.app_mean.convertTo(m_model.app_mean, MAT_TYPE(3));
 	//m_model.app_vectors = matio.find<cv::Mat>(aam[0], "app_ev");
 	//m_model.app_vectors.convertTo(m_model.app_vectors, MAT_TYPE(1));
@@ -119,7 +120,7 @@ void DetectFace::loadModel()
 	for (int i = 0; i < R.size(); i++)
 	{
 		m_model.R.push_back(R[i].data<cv::Mat>());
-		m_model.R[i].convertTo(m_model.R[i], CV_32SC3, 127);
+		m_model.R[i].convertTo(m_model.R[i], CV_16SC3, 255);
 		//m_model.R[i].convertTo(m_model.R[i], MAT_TYPE(3));
 	}
 
@@ -251,119 +252,85 @@ void DetectFace::drawText(cv::Mat & image, std::string text, cv::Scalar fontColo
 	putText(image, text, org, fontFace, fontScale, fontColor, fontThickness, 16);
 }
 
-GLuint textureID;
-void loadImageToTexture(cv::Mat image)
+GLuint tidMean;
+GLuint tidInput;
+GLenum my_program;
+GLenum my_vertex_shader;
+GLenum my_fragment_shader;
+GLuint loadImageToTexture(cv::Mat image)
 {
+    GLuint textureID;
+    GLenum type;
+
+	switch(image.type())
+	{
+	case CV_8UC3:
+	    type = GL_UNSIGNED_BYTE;
+	    break;
+	case CV_64FC3: // DOUBLE not supported, convert to FLOAT
+	    image.convertTo(image, CV_32FC3);
+	    type = GL_FLOAT;
+	    break;
+	default:
+	    std::cout<<"ERROR: Image type unknown: "<<image.type()<<std::endl;
+	    return 0;
+	};
+
     glGenTextures(1, &textureID);
     glBindTexture(GL_TEXTURE_2D, textureID);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.cols, image.rows, 0, GL_BGR, GL_UNSIGNED_BYTE, image.ptr());
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.cols, image.rows, 0, GL_BGR, type, image.ptr());
+
+    std::cout<<"Image loaded to GPU ("<<image.cols<<", "<<image.rows<<", "<<image.type()<<")"<<std::endl;
+
+    return textureID;
 }
 
 static const TYPE fInv640 = 1.0f / 640.0f;
 static const TYPE fInv480 = 1.0f / 480.0f;
-void warpImageGL(cv::Mat curr_points, cv::Mat shape_mesh, cv::Mat shape_mean)
+static const TYPE fInv180 = 1.0f / 180.0f;
+static const TYPE fInv193 = 1.0f / 193.0f;
+void warpImage(const cv::Mat & curr_points, const cv::Mat & shape_mesh, const cv::Mat & shape_mean)
 {
     // Clear background
     glClearColor(0.0, 0.0, 0.0, 0.0);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    // Render
     glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, textureID);
 
+    // Setup texture0: input
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, tidInput);
+    glUniform1i(glGetUniformLocation(my_program, "input_tex"), 0);
+
+    // Setup texture1: mean
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, tidMean);
+    glUniform1i(glGetUniformLocation(my_program, "mean_tex"), 1);
+
+    // Render
     glBegin(GL_TRIANGLES);
 	for (int t = 0; t < shape_mesh.rows; t++)
 	{
-		glTexCoord2d(curr_points.at<TYPE>(shape_mesh.at<int16_t>(t, 0), 1) * fInv640, curr_points.at<TYPE>(shape_mesh.at<int16_t>(t, 0), 0) * fInv480);
-		glVertex2d  (shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 0), 1),            shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 0), 0));
+		glMultiTexCoord2f(GL_TEXTURE0, curr_points.at<TYPE>(shape_mesh.at<int16_t>(t, 0), 1) * fInv640, curr_points.at<TYPE>(shape_mesh.at<int16_t>(t, 0), 0) * fInv480);
+		glMultiTexCoord2f(GL_TEXTURE1,  shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 0), 1) * fInv180,  shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 0), 0) * fInv193);
+		glVertex2d       (              shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 0), 1),            shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 0), 0));
 
-		glTexCoord2d(curr_points.at<TYPE>(shape_mesh.at<int16_t>(t, 1), 1) * fInv640, curr_points.at<TYPE>(shape_mesh.at<int16_t>(t, 1), 0) * fInv480);
-		glVertex2d  (shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 1), 1),            shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 1), 0));
+		glMultiTexCoord2f(GL_TEXTURE0, curr_points.at<TYPE>(shape_mesh.at<int16_t>(t, 1), 1) * fInv640, curr_points.at<TYPE>(shape_mesh.at<int16_t>(t, 1), 0) * fInv480);
+		glMultiTexCoord2f(GL_TEXTURE1,  shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 1), 1) * fInv180,  shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 1), 0) * fInv193);
+		glVertex2d       (              shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 1), 1),            shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 1), 0));
 
-		glTexCoord2d(curr_points.at<TYPE>(shape_mesh.at<int16_t>(t, 2), 1) * fInv640, curr_points.at<TYPE>(shape_mesh.at<int16_t>(t, 2), 0) * fInv480);
-		glVertex2d  (shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 2), 1),            shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 2), 0));
+		glMultiTexCoord2f(GL_TEXTURE0, curr_points.at<TYPE>(shape_mesh.at<int16_t>(t, 2), 1) * fInv640, curr_points.at<TYPE>(shape_mesh.at<int16_t>(t, 2), 0) * fInv480);
+		glMultiTexCoord2f(GL_TEXTURE1,  shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 2), 1) * fInv180,  shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 2), 0) * fInv193);
+		glVertex2d       (              shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 2), 1),            shape_mean.at<TYPE>(shape_mesh.at<int16_t>(t, 2), 0));
 	}
     glEnd();
 
     // Flush pipeline
     glFlush();
-}
-
-/**
- * Warps image from src using the warp map and the triangles in tris.
- */
-cv::Mat warpImage(cv::Mat image, cv::Mat src, cv::Mat tris, cv::Mat warp_map)
-{
-	cv::Mat warpedChannels[3];
-	warpedChannels[0] = cv::Mat::zeros(image.size(), CV_8UC1);
-	warpedChannels[1] = cv::Mat::zeros(image.size(), CV_8UC1);
-	warpedChannels[2] = cv::Mat::zeros(image.size(), CV_8UC1);
-	cv::Mat channels[3];
-	cv::split(image, channels);
-
-	for (int w = 0; w < warp_map.rows; w++)
-	{
-		TYPE i = warp_map.at<TYPE>(w, 0) - 1;
-		TYPE j = warp_map.at<TYPE>(w, 1) - 1;
-		TYPE t = warp_map.at<TYPE>(w, 2) - 1;
-		TYPE alpha = warp_map.at<TYPE>(w, 3);
-		TYPE beta = warp_map.at<TYPE>(w, 4);
-		TYPE gamma = warp_map.at<TYPE>(w, 5);
-
-		cv::Mat srcTri(3, 2, MAT_TYPE(1));
-		src.row(tris.at<int16_t>(t, 0)).copyTo(srcTri.row(0));
-		src.row(tris.at<int16_t>(t, 1)).copyTo(srcTri.row(1));
-		src.row(tris.at<int16_t>(t, 2)).copyTo(srcTri.row(2));
-
-		cv::Mat projection = alpha * srcTri.row(0) + beta * srcTri.row(1) + gamma * srcTri.row(2);
-
-		cv::Mat floor_prj;
-		projection.copyTo(floor_prj);
-		floor_prj.at<TYPE>(0, 0) = floor(floor_prj.at<TYPE>(0, 0));
-		floor_prj.at<TYPE>(0, 1) = floor(floor_prj.at<TYPE>(0, 1));
-
-		cv::Mat ceil_prj = floor_prj + 1.0;
-		cv::Mat diff_prj = projection - floor_prj;
-
-		cv::Mat neighbors[3];
-		neighbors[0] = cv::Mat(2, 2, MAT_TYPE(1));
-		neighbors[0].at<TYPE>(0, 0) = channels[0].at<uint8_t>(floor_prj.at<TYPE>(0, 0), floor_prj.at<TYPE>(0, 1));
-		neighbors[0].at<TYPE>(0, 1) = channels[0].at<uint8_t>(floor_prj.at<TYPE>(0, 0), ceil_prj.at<TYPE>(0, 1));
-		neighbors[0].at<TYPE>(1, 0) = channels[0].at<uint8_t>(ceil_prj.at<TYPE>(0, 0), floor_prj.at<TYPE>(0, 1));
-		neighbors[0].at<TYPE>(1, 1) = channels[0].at<uint8_t>(ceil_prj.at<TYPE>(0, 0), ceil_prj.at<TYPE>(0, 1));
-
-		neighbors[1] = cv::Mat(2, 2, MAT_TYPE(1));
-		neighbors[1].at<TYPE>(0, 0) = channels[1].at<uint8_t>(floor_prj.at<TYPE>(0, 0), floor_prj.at<TYPE>(0, 1));
-		neighbors[1].at<TYPE>(0, 1) = channels[1].at<uint8_t>(floor_prj.at<TYPE>(0, 0), ceil_prj.at<TYPE>(0, 1));
-		neighbors[1].at<TYPE>(1, 0) = channels[1].at<uint8_t>(ceil_prj.at<TYPE>(0, 0), floor_prj.at<TYPE>(0, 1));
-		neighbors[1].at<TYPE>(1, 1) = channels[1].at<uint8_t>(ceil_prj.at<TYPE>(0, 0), ceil_prj.at<TYPE>(0, 1));
-
-		neighbors[2] = cv::Mat(2, 2, MAT_TYPE(1));
-		neighbors[2].at<TYPE>(0, 0) = channels[2].at<uint8_t>(floor_prj.at<TYPE>(0, 0), floor_prj.at<TYPE>(0, 1));
-		neighbors[2].at<TYPE>(0, 1) = channels[2].at<uint8_t>(floor_prj.at<TYPE>(0, 0), ceil_prj.at<TYPE>(0, 1));
-		neighbors[2].at<TYPE>(1, 0) = channels[2].at<uint8_t>(ceil_prj.at<TYPE>(0, 0), floor_prj.at<TYPE>(0, 1));
-		neighbors[2].at<TYPE>(1, 1) = channels[2].at<uint8_t>(ceil_prj.at<TYPE>(0, 0), ceil_prj.at<TYPE>(0, 1));
-
-		cv::Mat y(1, 2, MAT_TYPE(1));
-		y.at<TYPE>(0, 0) = 1 - diff_prj.at<TYPE>(0, 0);
-		y.at<TYPE>(0, 1) = diff_prj.at<TYPE>(0, 0);
-
-		cv::Mat x(2, 1, MAT_TYPE(1));
-		x.at<TYPE>(0, 0) = 1 - diff_prj.at<TYPE>(0, 1);
-		x.at<TYPE>(1, 0) = diff_prj.at<TYPE>(0, 1);
-
-		warpedChannels[0].at<uint8_t>(i, j) = uint8_t(cv::Mat(y * neighbors[0] * x).at<TYPE>(0,0));
-		warpedChannels[1].at<uint8_t>(i, j) = uint8_t(cv::Mat(y * neighbors[1] * x).at<TYPE>(0,0));
-		warpedChannels[2].at<uint8_t>(i, j) = uint8_t(cv::Mat(y * neighbors[2] * x).at<TYPE>(0,0));
-	}
-
-	cv::Mat warped_im;
-	cv::merge(warpedChannels, 3, warped_im);
-	return warped_im;
 }
 
 /**
@@ -466,64 +433,40 @@ cv::Mat warp_composition(DetectFace::Model aam, cv::Mat d_s0)
 	return result + aam.curr_points;
 }
 
+int32_t
+calculateParameter(const cv::Mat & err_im, const cv::Mat & par_im)
+{
+    int32_t result = 0;
+    unsigned int iValues = err_im.cols * err_im.rows * 3;
+    const uint8_t * pErr = (uint8_t *)err_im.data;
+    const int16_t * pPar = (int16_t *)par_im.data;
+
+    while(iValues--)
+        result += (*pErr++ - 127) * *pPar++;
+
+    return result;
+}
+
 /**
  * Matches the AAM model to the current image.
  */
 void DetectFace::matchModel(cv::Mat image)
 {
-	//cv::Mat im;
-	//cv::cvtColor(image, im, CV_BGR2RGB);
 	loadImageToTexture(image);
 
 	TYPE err = INFINITY;
 
 	for (int it = 0; it < m_config.maxIteration; it++)
 	{
-#if 0
-
-		cv::Mat warped_im;
-		cv::cvtColor(image, warped_im, CV_BGR2RGB);
-
-		//ros::Time s = ros::Time::now();
-		warped_im = warpImage(warped_im, m_model.curr_points, m_model.shape_mesh, m_model.warp_map);
-		//std::cout << "Warping took: " << (ros::Time::now() - s).toSec() << std::endl;
-
-		warped_im = warped_im(cv::Rect(0, 0, m_model.width, m_model.height));
-
-#else
-
-		cv::Mat warped_im(m_model.height, m_model.width, CV_8UC3);
-
-		// Why does this not work?
-		//fnDisplayFunc = std::bind(warpImageGL, m_model.curr_points, m_model.shape_mesh, m_model.shape_mean);
-		//glutMainLoopEvent();
+		cv::Mat err_im(m_model.height, m_model.width, CV_8UC3);
 
 		// Call directly
-		warpImageGL(m_model.curr_points, m_model.shape_mesh, m_model.shape_mean);
+		warpImage(m_model.curr_points, m_model.shape_mesh, m_model.shape_mean);
 
 		// Read warped image
-		glPixelStorei(GL_PACK_ALIGNMENT, (warped_im.step & 3) ? 1 : 4);
-		glPixelStorei(GL_PACK_ROW_LENGTH, warped_im.step / warped_im.elemSize());
-		glReadPixels(0, 0, warped_im.cols, warped_im.rows, GL_BGR, GL_UNSIGNED_BYTE, warped_im.data);
-
-#endif
-		/*cv::Mat disp_warped_im, disp_im;
-		image.copyTo(disp_im);
-		drawMesh(disp_im, m_model.curr_points, cv::Scalar(255, 0, 0), m_model.shape_mesh);
-		//cv::cvtColor(warped_im, disp_warped_im, CV_RGB2BGR);
-		warped_im.copyTo(disp_warped_im);
-		drawMesh(disp_warped_im, m_model.shape_mean, cv::Scalar(255, 0, 0), m_model.shape_mesh);
-		cv::imshow("Normal Image", disp_im);
-		cv::imshow("Warped Image", disp_warped_im);
-		cv::waitKey();
-		//std::cout << "Warping took: " << (ros::Time::now() - s).toSec() << std::endl;*/
-
-		warped_im = warped_im(cv::Rect(0, 0, m_model.width, m_model.height));
-		warped_im.convertTo(warped_im, CV_32SC3, 127.0/255.0);
-		//warped_im.convertTo(warped_im, MAT_TYPE(1), 1.0/255.0);
-
-		// calculate the error image, is there a better way perhaps?
-		cv::Mat err_im = warped_im - m_model.app_mean;
+		glPixelStorei(GL_PACK_ALIGNMENT, (err_im.step & 3) ? 1 : 4);
+		glPixelStorei(GL_PACK_ROW_LENGTH, err_im.step / err_im.elemSize());
+		glReadPixels(0, 0, err_im.cols, err_im.rows, GL_BGR, GL_UNSIGNED_BYTE, err_im.data);
 
 		// the first few iterations only translate the model on top of the face, the other iterations also warps the model
 		if (m_model.trans_it)
@@ -533,9 +476,9 @@ void DetectFace::matchModel(cv::Mat image)
 			// transformation parameters
 			cv::Mat delta_q(4, 1, MAT_TYPE(1));
 			for (int i = 0; i < 4; i++)
-				delta_q.at<TYPE>(i, 0) = cv::sum(cv::sum(m_model.R[i].mul(err_im)))[0];
+				delta_q.at<TYPE>(i, 0) = calculateParameter(err_im, m_model.R[i]);
 
-			delta_q /= (127.0 * 127.0);
+			delta_q /= (255.0 * 255.0);
 
 			cv::Mat A, tr;
 			to_affine(m_model, -delta_q, A, tr);
@@ -553,9 +496,9 @@ void DetectFace::matchModel(cv::Mat image)
 			// do transformation and warping
 			cv::Mat delta_qp(m_model.R.size(), 1, MAT_TYPE(1));
 			for (int i = 0; i < m_model.R.size(); i++)
-				delta_qp.at<TYPE>(i, 0) = cv::sum(cv::sum(m_model.R[i].mul(err_im)))[0];
+				delta_qp.at<TYPE>(i, 0) = calculateParameter(err_im, m_model.R[i]);
 
-			delta_qp /= (127.0 * 127.0);
+			delta_qp /= (255.0 * 255.0);
 
 			cv::Mat d_s0(m_model.shape_mean.size(), MAT_TYPE(1));
 			cv::Mat s;
@@ -709,6 +652,104 @@ void displayFunc()
 {
 }
 
+char * loadFile(const char * filename)
+{
+    std::ifstream is(filename, std::ifstream::binary);
+    if(!is)
+    {
+        std::cout<<"ERROR: Unable to load file "<<filename<<std::endl;
+        exit(-1);
+    }
+
+    // get length of file:
+    is.seekg (0, is.end);
+    int length = is.tellg();
+    is.seekg (0, is.beg);
+
+    char * buffer = new char [length];
+    is.read (buffer,length);
+    is.close();
+
+    return buffer;
+}
+
+//#define DEBUG_SHADERS
+#ifdef DEBUG_SHADERS
+void printShaderInfoLog(GLuint obj)
+{
+    int infologLength = 0;
+    int charsWritten  = 0;
+    char *infoLog;
+
+	glGetShaderiv(obj, GL_INFO_LOG_LENGTH,&infologLength);
+
+    if (infologLength > 0)
+    {
+        infoLog = (char *)malloc(infologLength);
+        glGetShaderInfoLog(obj, infologLength, &charsWritten, infoLog);
+		printf("%s\n",infoLog);
+        free(infoLog);
+    }
+}
+
+void printProgramInfoLog(GLuint obj)
+{
+    int infologLength = 0;
+    int charsWritten  = 0;
+    char *infoLog;
+
+	glGetProgramiv(obj, GL_INFO_LOG_LENGTH,&infologLength);
+
+    if (infologLength > 0)
+    {
+        infoLog = (char *)malloc(infologLength);
+        glGetProgramInfoLog(obj, infologLength, &charsWritten, infoLog);
+		printf("%s\n",infoLog);
+        free(infoLog);
+    }
+}
+#endif
+
+void loadShaders()
+{
+    // Get Vertex And Fragment Shader Sources
+    const char * my_vertex_shader_source   = loadFile("../src/vertexshader.glsl");
+    const char * my_fragment_shader_source = loadFile("../src/fragmentshader.glsl");
+
+    // Create Shader And Program Objects
+    my_program         = glCreateProgramObjectARB();
+    my_vertex_shader   = glCreateShaderObjectARB(GL_VERTEX_SHADER_ARB);
+    my_fragment_shader = glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB);
+
+    // Load Shader Sources
+    glShaderSourceARB(my_vertex_shader, 1, &my_vertex_shader_source, NULL);
+    glShaderSourceARB(my_fragment_shader, 1, &my_fragment_shader_source, NULL);
+
+    // Compile The Shaders
+    glCompileShaderARB(my_vertex_shader);
+    glCompileShaderARB(my_fragment_shader);
+
+    // Attach The Shader Objects To The Program Object
+    glAttachObjectARB(my_program, my_vertex_shader);
+    glAttachObjectARB(my_program, my_fragment_shader);
+
+    // Link The Program Object
+    glLinkProgramARB(my_program);
+
+    // Use The Program Object Instead Of Fixed Function OpenGL
+    glUseProgramObjectARB(my_program);
+
+    delete[] my_fragment_shader_source;
+    delete[] my_vertex_shader_source;
+
+#ifdef DEBUG_SHADERS
+    printShaderInfoLog(my_vertex_shader);
+    printShaderInfoLog(my_fragment_shader);
+    printProgramInfoLog(my_program);
+    exit(0);
+#endif
+}
+
 /**
  * Main loop.
  */
@@ -729,8 +770,11 @@ void DetectFace::spin()
     glLoadIdentity();
     glOrtho(0.0f, m_model.width, 0.0f, m_model.height, 0.0f, 1.0f); // Upside down image (for OpenCV)
     //glOrtho(0.0f, m_model.width, m_model.height, 0.0f, 0.0f, 1.0f); // Normal image
-    // Load texture
-    loadImageToTexture(image);
+    // Load textures
+    tidInput = loadImageToTexture(image);
+    tidMean  = loadImageToTexture(m_model.app_mean);
+    // Load shaders
+    loadShaders();
 
 	//Start and end times
 	time_t start,end;
