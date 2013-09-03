@@ -254,9 +254,9 @@ void DetectFace::drawText(cv::Mat & image, std::string text, cv::Scalar fontColo
 
 GLuint tidMean;
 GLuint tidInput;
-GLenum my_program;
-GLenum my_vertex_shader;
-GLenum my_fragment_shader;
+GLhandleARB my_program;
+GLhandleARB my_vertex_shader;
+GLhandleARB my_fragment_shader;
 GLuint loadImageToTexture(cv::Mat image)
 {
     GLuint textureID;
@@ -304,12 +304,12 @@ void warpImage(const cv::Mat & curr_points, const cv::Mat & shape_mesh, const cv
     // Setup texture0: input
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tidInput);
-    glUniform1i(glGetUniformLocation(my_program, "input_tex"), 0);
+    glUniform1i(glGetUniformLocationARB(my_program, "input_tex"), 0);
 
     // Setup texture1: mean
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, tidMean);
-    glUniform1i(glGetUniformLocation(my_program, "mean_tex"), 1);
+    glUniform1i(glGetUniformLocationARB(my_program, "mean_tex"), 1);
 
     // Render
     glBegin(GL_TRIANGLES);
