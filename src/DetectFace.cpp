@@ -392,14 +392,14 @@ void to_affine(DetectFace::Model aam, cv::Mat q, cv::Mat & A, cv::Mat & tr)
 cv::Mat warp_composition(DetectFace::Model aam, cv::Mat d_s0)
 {
 	cv::Mat result = cv::Mat::zeros(aam.curr_points.size(), MAT_TYPE(1));
-	cv::Mat nt = cv::Mat::zeros(aam.shape_mean.rows, 1, CV_8UC1);
+	cv::Mat nt = cv::Mat::zeros(aam.shape_mean.rows, 1, MAT_TYPE(1));
 	for (int t = 0; t < aam.shape_mesh.rows; t++)
 	{
 		cv::Mat tr = aam.shape_mesh.row(t);
 
-		nt.at<uint8_t>(tr.at<int16_t>(0, 0), 0)++;
-		nt.at<uint8_t>(tr.at<int16_t>(0, 1), 0)++;
-		nt.at<uint8_t>(tr.at<int16_t>(0, 2), 0)++;
+		nt.at<TYPE>(tr.at<int16_t>(0, 0), 0)++;
+		nt.at<TYPE>(tr.at<int16_t>(0, 1), 0)++;
+		nt.at<TYPE>(tr.at<int16_t>(0, 2), 0)++;
 
 		for (int k = 0; k < 3; k++)
 		{
@@ -428,8 +428,10 @@ cv::Mat warp_composition(DetectFace::Model aam, cv::Mat d_s0)
 		}
 	}
 
-	cv::divide(result.col(0), nt, result.col(0));
-	cv::divide(result.col(1), nt, result.col(1));
+	cv::Mat tmp = result.col(0);
+	cv::divide(result.col(0), nt, tmp);
+	tmp = result.col(1);
+	cv::divide(result.col(1), nt, tmp);
 	return result + aam.curr_points;
 }
 
@@ -503,8 +505,8 @@ void DetectFace::matchModel(cv::Mat image)
 			cv::Mat d_s0(m_model.shape_mean.size(), MAT_TYPE(1));
 			cv::Mat s;
 			cv::reduce(m_model.shape_vectors * delta_qp.rowRange(4, delta_qp.rows), s, 1, CV_REDUCE_SUM);
-			s.rowRange(0, d_s0.rows).copyTo(d_s0.col(0));
-			s.rowRange(d_s0.rows, s.rows).copyTo(d_s0.col(1));
+			d_s0.col(0) = s.rowRange(0, d_s0.rows);
+			d_s0.col(1) = s.rowRange(d_s0.rows, s.rows);
 			d_s0 = m_model.shape_mean - d_s0;
 
 			cv::Mat A, tr;
@@ -540,41 +542,41 @@ void DetectFace::processImage(cv::Mat image)
 
 	if (m_modelLoaded)
 	{
-		cv::Mat grayImage;
-
-		cv::cvtColor(image, grayImage, CV_RGB2GRAY);
-
-#ifdef HAVE_CUDA
-		cv::gpu::GpuMat imageGpu;
-		if (m_config.cudaEnabled)
-			imageGpu.upload(grayImage);
-#endif
-
-
-		//create a vector array to store the face found
-		std::vector<cv::Rect> faces;
-
-		//find faces and store them in the vector array
-#ifdef HAVE_CUDA
-		if (m_config.cudaEnabled)
-		{
-			cv::gpu::GpuMat facesGpu;
-			m_faceCascadeGpu.findLargestObject = true;
-			//m_faceCascadeGpu.visualizeInPlace = true;
-			int nrdetect = m_faceCascadeGpu.detectMultiScale(imageGpu, facesGpu, 1.1, 3, cv::Size(30,30));
-
-			cv::Mat facesDownloaded;
-			facesGpu.colRange(0, nrdetect).download(facesDownloaded);
-
-			faces.insert(faces.end(), &facesDownloaded.ptr<cv::Rect>()[0], &facesDownloaded.ptr<cv::Rect>()[nrdetect]);
-		}
-		else
-#endif
-			m_faceCascade.detectMultiScale(grayImage, faces, 1.1, 3, CV_HAAR_FIND_BIGGEST_OBJECT|CV_HAAR_SCALE_IMAGE, cv::Size(30,30));
-
 		if (m_model.curr_points.empty())
 		{
-			// found a face?
+			cv::Mat grayImage;
+
+			cv::cvtColor(image, grayImage, CV_RGB2GRAY);
+
+#ifdef HAVE_CUDA
+			cv::gpu::GpuMat imageGpu;
+			if (m_config.cudaEnabled)
+				imageGpu.upload(grayImage);
+#endif
+
+
+			//create a vector array to store the face found
+			std::vector<cv::Rect> faces;
+
+			//find faces and store them in the vector array
+#ifdef HAVE_CUDA
+			if (m_config.cudaEnabled)
+			{
+				cv::gpu::GpuMat facesGpu;
+				m_faceCascadeGpu.findLargestObject = true;
+				//m_faceCascadeGpu.visualizeInPlace = true;
+				int nrdetect = m_faceCascadeGpu.detectMultiScale(imageGpu, facesGpu, 1.1, 3, cv::Size(30,30));
+
+				cv::Mat facesDownloaded;
+				facesGpu.colRange(0, nrdetect).download(facesDownloaded);
+
+				faces.insert(faces.end(), &facesDownloaded.ptr<cv::Rect>()[0], &facesDownloaded.ptr<cv::Rect>()[nrdetect]);
+			}
+			else
+#endif
+				m_faceCascade.detectMultiScale(grayImage, faces, 1.1, 3, CV_HAAR_FIND_BIGGEST_OBJECT|CV_HAAR_SCALE_IMAGE, cv::Size(30,30));
+
+
 			if (faces.size())
 			{
 				//cv::rectangle(image, faces[0], cv::Scalar(255, 0, 0));
